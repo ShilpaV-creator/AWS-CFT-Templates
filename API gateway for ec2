@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+
+  VpcId:
+    Type: String
+    Description: The ID of the VPC containing the EC2 instance
+
+  InstanceAZ:
+    Type: String
+    Description: The availability zone containing the EC2 instance
+
+  InstanceId:
+    Type: String
+    Description: The ID of the EC2 instance
+
+  InstancePort:
+    Type: String
+    Description: The port on which the EC2 instance is listening
+
+  Subnet:
+    Type: String
+    Description: The ID of the subnet containing the EC2 instance
+  
+Resources:
+
+  #############################
+  # VPC
+  #############################
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Port: 80
+      Protocol: TCP
+      TargetType: instance
+      Targets: 
+        - Id: !Ref InstanceId
+          Port: !Ref InstancePort
+      VpcId: !Ref VpcId
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internal
+      Subnets: 
+        - !Ref Subnet
+      Type: network
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      DefaultActions: 
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: TCP
+
+  VpcLink:
+    Type: AWS::ApiGateway::VpcLink
+    Properties: 
+      Name: vpc-link
+      TargetArns: 
+        - !Ref LoadBalancer
+
+  #############################
+  # API
+  #############################
+
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: production
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+      DefinitionBody:
+        swagger: 2.0
+        paths:
+          /api_endpoint:
+            get:
+              x-amazon-apigateway-integration:
+                connectionId: !Ref VpcLink
+                connectionType: VPC_LINK
+                httpMethod: GET
+                type: http_proxy
+                uri: !Join ["", ["http://", !GetAtt LoadBalancer.DNSName, "/ec2_endpoint"]]
